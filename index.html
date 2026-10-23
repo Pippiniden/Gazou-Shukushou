@@ -107,7 +107,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
  const source = $('sourceCanvas'), sctx = source.getContext('2d');
  const result = $('resultCanvas'), rctx = result.getContext('2d');
  let image = null, originalName = 'image', crop = {x:0,y:0,w:1,h:1}, viewScaleX=1, viewScaleY=1, zoom=1;
- let dragging=false, dragStart=null, lastBlob=null, moveMode=false, dragOrigin=null;
+ let dragging=false, dragStart=null, lastBlob=null, moveMode=false, dragOrigin=null, dragAspectRatio=1;
  const activePointers=new Map();
  let pinchStart=null;
  const MAX_SIDE=12000, MAX_PIXELS=40000000;
@@ -355,7 +355,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   }
   if(activePointers.size>2){dragging=false;return;}
   const p=pointFromEvent(e);
-  dragging=true;dragStart=p;
+  dragging=true;dragStart=p;dragAspectRatio=Math.max(.0001,crop.w/crop.h);
   if(moveMode){
    if(!pointInCrop(p)){dragging=false;return;}
    dragOrigin={x:crop.x,y:crop.y};source.classList.add('dragging');
@@ -385,7 +385,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
    dx=(dx<0?-1:1)*side;dy=(dy<0?-1:1)*side;
    ex=sx+dx;ey=sy+dy;
   }else if(e.altKey){
-   const ratio=Math.max(.0001,crop.w/crop.h);
+   const ratio=dragAspectRatio;
    if(Math.abs(dx)/Math.max(.0001,Math.abs(dy))>ratio)dy=(dy<0?-1:1)*Math.abs(dx)/ratio;
    else dx=(dx<0?-1:1)*Math.abs(dy)*ratio;
    ex=sx+dx;ey=sy+dy;
