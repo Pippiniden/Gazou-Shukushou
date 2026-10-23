@@ -309,6 +309,10 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   const url=URL.createObjectURL(file),next=new Image();
   next.onload=()=>{
    image=next;originalName=file.name.replace(/\.[^.]+$/,'')||'image';
+   moveMode=false;
+   $('moveMode').textContent='範囲を移動：OFF';
+   $('moveMode').setAttribute('aria-pressed','false');
+   source.classList.remove('move-mode','dragging');
    crop={x:0,y:0,w:image.naturalWidth,h:image.naturalHeight};writeCropInputs();
    $('sourceInfo').textContent=image.naturalWidth+' × '+image.naturalHeight+' px';
    $('refresh').disabled=false;$('resetCrop').disabled=false;$('moveMode').disabled=false;
