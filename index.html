@@ -146,11 +146,18 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
  function lanczosWeight(x,a){x=Math.abs(x);return x<a?sinc(x)*sinc(x/a):0;}
  function drawLanczos(ctx,sourceImage,sx,sy,sw,sh,dx,dy,dw,dh,outW,outH){
   const targetW=Math.max(1,Math.round(dw)),targetH=Math.max(1,Math.round(dh));
-  const cropCanvas=document.createElement('canvas');
-  cropCanvas.width=Math.max(1,Math.round(sw));cropCanvas.height=Math.max(1,Math.round(sh));
-  const cctx=cropCanvas.getContext('2d',{willReadFrequently:true});
-  cctx.drawImage(sourceImage,sx,sy,sw,sh,0,0,cropCanvas.width,cropCanvas.height);
-  let data=cctx.getImageData(0,0,cropCanvas.width,cropCanvas.height);
+  let workingCanvas=document.createElement('canvas');
+  workingCanvas.width=Math.max(1,Math.round(sw));workingCanvas.height=Math.max(1,Math.round(sh));
+  workingCanvas.getContext('2d').drawImage(sourceImage,sx,sy,sw,sh,0,0,workingCanvas.width,workingCanvas.height);
+  // Pre-reduce very large images in half-size steps to keep Lanczos work bounded.
+  while(workingCanvas.width>targetW*2||workingCanvas.height>targetH*2){
+   const nextW=workingCanvas.width>targetW*2?Math.max(targetW*2,Math.ceil(workingCanvas.width/2)):workingCanvas.width;
+   const nextH=workingCanvas.height>targetH*2?Math.max(targetH*2,Math.ceil(workingCanvas.height/2)):workingCanvas.height;
+   const stage=document.createElement('canvas');stage.width=nextW;stage.height=nextH;
+   const stageCtx=stage.getContext('2d');stageCtx.imageSmoothingEnabled=true;stageCtx.imageSmoothingQuality='high';
+   stageCtx.drawImage(workingCanvas,0,0,nextW,nextH);workingCanvas=stage;
+  }
+  const data=workingCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,workingCanvas.width,workingCanvas.height);
   const srcW=data.width,srcH=data.height;
   const scaleX=targetW/srcW,scaleY=targetH/srcH;
   const temp=new Float32Array(targetW*srcH*4);
