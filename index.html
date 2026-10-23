@@ -25,6 +25,8 @@ label{display:block;color:var(--muted);font-size:.83rem;margin-bottom:4px}.field
 .file-input{display:none}.pill{font-size:.78rem;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:3px 8px}
 .stage{min-height:300px;display:flex;align-items:center;justify-content:center;overflow:auto;border-radius:8px;position:relative;background-color:#0b0e13;background-image:linear-gradient(45deg,#171e28 25%,transparent 25%),linear-gradient(-45deg,#171e28 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#171e28 75%),linear-gradient(-45deg,transparent 75%,#171e28 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}
 #sourceCanvas{display:block;max-width:100%;max-height:65vh;touch-action:none;cursor:crosshair}
+#sourceCanvas.move-mode{cursor:grab}#sourceCanvas.move-mode.dragging{cursor:grabbing}
+button[aria-pressed="true"]{background:#185b8e;border-color:#77c5ff}
 .preview{min-height:240px;padding:10px}#resultCanvas{display:block;max-width:100%;max-height:48vh;object-fit:contain;image-rendering:auto}
 .hint,.status{font-size:.82rem;color:var(--muted);margin:8px 0 0}.status{min-height:1.3em}.warn{color:var(--danger)}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.full{width:100%}
@@ -44,10 +46,11 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
  <div class="toolbar">
   <label class="file-button" for="fileInput">画像を読み込む</label><input class="file-input" id="fileInput" type="file" accept="image/*">
   <button id="resetCrop" disabled>全体を選択</button>
+  <button id="moveMode" disabled aria-pressed="false">範囲を移動：OFF</button>
   <span class="pill" id="sourceInfo">画像未読み込み</span>
  </div>
  <div class="stage" id="sourceStage"><canvas id="sourceCanvas" width="1" height="1"></canvas></div>
- <p class="hint">画像上をドラッグして範囲を指定。数値入力で位置や寸法を微調整できます。</p>
+ <p class="hint">通常はドラッグして範囲を選択。［範囲を移動］をONにすると、選択範囲の内側をドラッグして位置だけを移動できます。数値入力で微調整も可能です。</p>
  <div class="section">
   <h3>切り抜き範囲（元画像のピクセル座標）</h3>
   <div class="grid2">
@@ -75,7 +78,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
    <div class="field"><label for="format">出力形式</label><select id="format"><option value="image/png">PNG（透過・可逆）</option><option value="image/webp">WebP</option><option value="image/jpeg">JPEG（透過なし）</option></select></div>
    <div class="field"><label for="quality">WebP / JPEG 品質：<span id="qualityText">90%</span></label><input id="quality" type="range" min="10" max="100" value="90"></div>
   </div>
-  <div class="field" style="margin-top:10px"><label for="smoothing">補間方式</label><select id="smoothing"><option value="high">高品質（ブラウザの高品質補間）</option><option value="medium">標準品質</option><option value="low">低品質・高速</option><option value="pixelated">最近傍補間（ドット絵向け）</option></select></div>
+  <div class="field" style="margin-top:10px"><label for="smoothing">補間方式</label><select id="smoothing"><option value="high">Lanczos-3（高品質・処理は重め）</option><option value="medium">標準品質</option><option value="low">低品質・高速</option><option value="pixelated">最近傍補間（ドット絵向け）</option></select></div>
   <div class="grid2" style="margin-top:10px">
    <div class="field"><label for="background">透明部分の背景色（JPEG用）</label><input id="background" type="color" value="#ffffff"></div>
    <div class="field"><label for="sharpen">シャープネス</label><select id="sharpen"><option value="0">なし</option><option value="0.2">弱</option><option value="0.4">中</option><option value="0.65">強</option></select></div>
@@ -98,7 +101,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
  const source = $('sourceCanvas'), sctx = source.getContext('2d');
  const result = $('resultCanvas'), rctx = result.getContext('2d');
  let image = null, originalName = 'image', crop = {x:0,y:0,w:1,h:1}, viewScaleX=1, viewScaleY=1;
- let dragging=false, dragStart=null, lastBlob=null;
+ let dragging=false, dragStart=null, lastBlob=null, moveMode=false, dragOrigin=null;
  const MAX_SIDE=12000, MAX_PIXELS=40000000;
  const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
  const setStatus=(message,isError=false)=>{$('status').textContent=message;$('status').classList.toggle('warn',isError)};
@@ -136,6 +139,59 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   if(w*h>MAX_PIXELS){const scale=Math.sqrt(MAX_PIXELS/(w*h));w=Math.max(1,Math.floor(w*scale));h=Math.max(1,Math.floor(h*scale));setStatus('出力の総画素数が大きいため、'+w+' × '+h+' px に制限しました。',true);}
   $('outW').value=w;$('outH').value=h;return {w,h};
  }
+
+ // Separable Lanczos-3 resampler. Uses premultiplied alpha during filtering
+ // to reduce dark/colored fringes around transparent game sprites.
+ function sinc(x){if(Math.abs(x)<1e-7)return 1;const p=Math.PI*x;return Math.sin(p)/p;}
+ function lanczosWeight(x,a){x=Math.abs(x);return x<a?sinc(x)*sinc(x/a):0;}
+ function drawLanczos(ctx,sourceImage,sx,sy,sw,sh,dx,dy,dw,dh,outW,outH){
+  const targetW=Math.max(1,Math.round(dw)),targetH=Math.max(1,Math.round(dh));
+  const cropCanvas=document.createElement('canvas');
+  cropCanvas.width=Math.max(1,Math.round(sw));cropCanvas.height=Math.max(1,Math.round(sh));
+  const cctx=cropCanvas.getContext('2d',{willReadFrequently:true});
+  cctx.drawImage(sourceImage,sx,sy,sw,sh,0,0,cropCanvas.width,cropCanvas.height);
+  let data=cctx.getImageData(0,0,cropCanvas.width,cropCanvas.height);
+  const srcW=data.width,srcH=data.height;
+  const scaleX=targetW/srcW,scaleY=targetH/srcH;
+  const temp=new Float32Array(targetW*srcH*4);
+  const horizontalScale=Math.min(1,scaleX),a=3;
+  for(let y=0;y<srcH;y++){
+   for(let x=0;x<targetW;x++){
+    const center=(x+.5)/scaleX-.5, radius=a/horizontalScale;
+    const left=Math.max(0,Math.floor(center-radius)),right=Math.min(srcW-1,Math.ceil(center+radius));
+    let sums=[0,0,0,0],weightSum=0;
+    for(let ix=left;ix<=right;ix++){
+     const weight=lanczosWeight((center-ix)*horizontalScale,a);if(weight===0)continue;
+     const i=(y*srcW+ix)*4,alpha=data.data[i+3]/255;
+     sums[0]+=data.data[i]*alpha*weight;sums[1]+=data.data[i+1]*alpha*weight;sums[2]+=data.data[i+2]*alpha*weight;sums[3]+=alpha*weight;weightSum+=weight;
+    }
+    const o=(y*targetW+x)*4,den=weightSum||1;
+    temp[o]=sums[0]/den;temp[o+1]=sums[1]/den;temp[o+2]=sums[2]/den;temp[o+3]=sums[3]/den;
+   }
+  }
+  const output=ctx.createImageData(targetW,targetH),verticalScale=Math.min(1,scaleY);
+  for(let y=0;y<targetH;y++){
+   const center=(y+.5)/scaleY-.5,radius=a/verticalScale;
+   const top=Math.max(0,Math.floor(center-radius)),bottom=Math.min(srcH-1,Math.ceil(center+radius));
+   for(let x=0;x<targetW;x++){
+    let sums=[0,0,0,0],weightSum=0;
+    for(let iy=top;iy<=bottom;iy++){
+     const weight=lanczosWeight((center-iy)*verticalScale,a);if(weight===0)continue;
+     const i=(iy*targetW+x)*4;
+     for(let c=0;c<4;c++)sums[c]+=temp[i+c]*weight;
+     weightSum+=weight;
+    }
+    const o=(y*targetW+x)*4,den=weightSum||1,alpha=clamp(sums[3]/den,0,1);
+    output.data[o+3]=Math.round(alpha*255);
+    if(alpha>1e-6){output.data[o]=clamp(Math.round((sums[0]/den)/alpha),0,255);output.data[o+1]=clamp(Math.round((sums[1]/den)/alpha),0,255);output.data[o+2]=clamp(Math.round((sums[2]/den)/alpha),0,255);}
+    else{output.data[o]=0;output.data[o+1]=0;output.data[o+2]=0;}
+   }
+  }
+  const resized=document.createElement('canvas');resized.width=targetW;resized.height=targetH;
+  resized.getContext('2d').putImageData(output,0,0);
+  ctx.drawImage(resized,dx,dy,dw,dh);
+ }
+
  function applySharpen(ctx,w,h,amount){
   if(!amount||w<3||h<3||w*h>16000000)return;
   const imageData=ctx.getImageData(0,0,w,h),src=new Uint8ClampedArray(imageData.data),dst=imageData.data;
@@ -166,7 +222,12 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
    if(ratio>target){const newW=sh*target;sx+=(sw-newW)/2;sw=newW;}
    else{const newH=sw/target;sy+=(sh-newH)/2;sh=newH;}
   }
-  rctx.drawImage(image,sx,sy,sw,sh,dx,dy,dw,dh);
+  const qualityMode=$('smoothing').value;
+  if(qualityMode==='high'){
+   drawLanczos(rctx,image,sx,sy,sw,sh,dx,dy,dw,dh,ow,oh);
+  }else{
+   rctx.drawImage(image,sx,sy,sw,sh,dx,dy,dw,dh);
+  }
   applySharpen(rctx,ow,oh,Number($('sharpen').value));
   $('resultInfo').textContent=ow+' × '+oh+' px ／ 切り抜き '+crop.w+' × '+crop.h+' px';
   $('download').disabled=false;lastBlob=null;
@@ -184,7 +245,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
    image=next;originalName=file.name.replace(/\.[^.]+$/,'')||'image';
    crop={x:0,y:0,w:image.naturalWidth,h:image.naturalHeight};writeCropInputs();
    $('sourceInfo').textContent=image.naturalWidth+' × '+image.naturalHeight+' px';
-   $('refresh').disabled=false;$('resetCrop').disabled=false;
+   $('refresh').disabled=false;$('resetCrop').disabled=false;$('moveMode').disabled=false;
    const defaultW=Math.min(256,image.naturalWidth),defaultH=Math.max(1,Math.round(defaultW*image.naturalHeight/image.naturalWidth));
    $('outW').value=defaultW;$('outH').value=defaultH;
    drawSource();render();URL.revokeObjectURL(url);
@@ -192,17 +253,41 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   next.onerror=()=>{URL.revokeObjectURL(url);setStatus('画像を読み込めませんでした。別の画像をお試しください。',true);};
   next.src=url;
  });
+ function pointInCrop(p){
+  const x=p.x/viewScaleX,y=p.y/viewScaleY;
+  return x>=crop.x&&x<=crop.x+crop.w&&y>=crop.y&&y<=crop.y+crop.h;
+ }
  source.addEventListener('pointerdown',e=>{
-  if(!image)return;dragging=true;dragStart=pointFromEvent(e);source.setPointerCapture(e.pointerId);
+  if(!image)return;
+  const p=pointFromEvent(e);
+  dragging=true;dragStart=p;source.setPointerCapture(e.pointerId);
+  if(moveMode){
+   if(!pointInCrop(p)){dragging=false;return;}
+   dragOrigin={x:crop.x,y:crop.y};source.classList.add('dragging');
+  }
  });
  source.addEventListener('pointermove',e=>{
   if(!dragging||!image)return;
-  const p=pointFromEvent(e),x=Math.min(p.x,dragStart.x)/viewScaleX,y=Math.min(p.y,dragStart.y)/viewScaleY;
+  const p=pointFromEvent(e);
+  if(moveMode){
+   const dx=(p.x-dragStart.x)/viewScaleX,dy=(p.y-dragStart.y)/viewScaleY;
+   crop=normalizeCrop({x:dragOrigin.x+dx,y:dragOrigin.y+dy,w:crop.w,h:crop.h});
+   writeCropInputs();drawSource();render();return;
+  }
+  const x=Math.min(p.x,dragStart.x)/viewScaleX,y=Math.min(p.y,dragStart.y)/viewScaleY;
   const w=Math.abs(p.x-dragStart.x)/viewScaleX,h=Math.abs(p.y-dragStart.y)/viewScaleY;
   if(w>=1&&h>=1){crop=normalizeCrop({x,y,w,h});writeCropInputs();drawSource();render();}
  });
- source.addEventListener('pointerup',()=>{dragging=false;});
- source.addEventListener('pointercancel',()=>{dragging=false;});
+ function endPointer(){dragging=false;source.classList.remove('dragging');}
+ source.addEventListener('pointerup',endPointer);
+ source.addEventListener('pointercancel',endPointer);
+ $('moveMode').addEventListener('click',()=>{
+  moveMode=!moveMode;
+  $('moveMode').textContent='範囲を移動：'+(moveMode?'ON':'OFF');
+  $('moveMode').setAttribute('aria-pressed',String(moveMode));
+  source.classList.toggle('move-mode',moveMode);
+  setStatus(moveMode?'移動モード：選択範囲の内側をドラッグして移動できます。':'範囲選択モード：ドラッグして新しい範囲を指定できます。');
+ });
  ['cropX','cropY','cropW','cropH'].forEach(id=>$(id).addEventListener('change',readCropInputs));
  $('outW').addEventListener('change',()=>{
   if($('keepRatio').checked&&image){const w=clamp(Math.round(Number($('outW').value)||1),1,MAX_SIDE);$('outH').value=Math.max(1,Math.round(w*crop.h/crop.w));}
