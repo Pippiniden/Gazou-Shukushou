@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="ゲーム用画像の切り抜き、リサイズ、形式変換をブラウザ内で行う無料ツール">
+<title>画像縮小 — ゲーム素材加工ツール</title>
+<style>
+:root{color-scheme:dark;--bg:#10141b;--panel:#191f29;--panel2:#121821;--line:#303b4b;--text:#edf2f7;--muted:#a6b2c2;--accent:#77c5ff;--accent2:#2a6fa5;--danger:#ff9d9d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{padding:18px 22px;border-bottom:1px solid var(--line);background:#151b24;display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}
+h1{font-size:1.35rem;margin:0}header p{margin:4px 0 0;color:var(--muted)}a{color:var(--accent)}
+main{max-width:1500px;margin:auto;padding:16px;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(340px,.8fr);gap:16px}
+.panel{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px}
+h2{font-size:1rem;margin:0 0 12px}h3{font-size:.92rem;margin:0 0 10px;color:#d9e4ef}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+button,.file-button{background:#263446;border:1px solid #43556b;color:var(--text);border-radius:7px;padding:8px 11px;cursor:pointer;font:inherit;display:inline-flex;align-items:center;justify-content:center}
+button:hover,.file-button:hover{border-color:var(--accent)}button.primary{background:#185b8e;border-color:#3287bd}button:disabled{opacity:.4;cursor:not-allowed}
+input,select{width:100%;background:var(--panel2);color:var(--text);border:1px solid #3b485a;border-radius:6px;padding:8px;font:inherit;min-width:0}
+input[type=checkbox]{width:auto;accent-color:var(--accent)}input[type=range]{padding:0}
+label{display:block;color:var(--muted);font-size:.83rem;margin-bottom:4px}.field{min-width:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.section{border-top:1px solid var(--line);margin-top:15px;padding-top:14px}
+.inline{display:flex;align-items:center;gap:8px;margin-top:9px}.inline label{margin:0}
+.file-input{display:none}.pill{font-size:.78rem;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:3px 8px}
+.stage{min-height:300px;display:flex;align-items:center;justify-content:center;overflow:auto;border-radius:8px;position:relative;background-color:#0b0e13;background-image:linear-gradient(45deg,#171e28 25%,transparent 25%),linear-gradient(-45deg,#171e28 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#171e28 75%),linear-gradient(-45deg,transparent 75%,#171e28 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}
+#sourceCanvas{display:block;max-width:100%;max-height:65vh;touch-action:none;cursor:crosshair}
+.preview{min-height:240px;padding:10px}#resultCanvas{display:block;max-width:100%;max-height:48vh;object-fit:contain;image-rendering:auto}
+.hint,.status{font-size:.82rem;color:var(--muted);margin:8px 0 0}.status{min-height:1.3em}.warn{color:var(--danger)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.full{width:100%}
+footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-size:.8rem}
+@media(max-width:900px){main{grid-template-columns:1fr;padding:10px}.panel{padding:12px}.stage{min-height:230px}#sourceCanvas{max-height:52vh}header{padding:15px}}
+@media(max-width:420px){.grid3{grid-template-columns:1fr 1fr}.grid2{gap:8px}}
+</style>
+</head>
+<body>
+<header>
+ <div><h1>画像縮小 — ゲーム素材加工ツール</h1><p>切り抜き・リサイズ・形式変換をブラウザ内で処理</p></div>
+ <a href="docs/requirements.md" target="_blank" rel="noopener">要件定義書</a>
+</header>
+<main>
+<section class="panel">
+ <h2>1. 元画像・切り抜き</h2>
+ <div class="toolbar">
+  <label class="file-button" for="fileInput">画像を読み込む</label><input class="file-input" id="fileInput" type="file" accept="image/*">
+  <button id="resetCrop" disabled>全体を選択</button>
+  <span class="pill" id="sourceInfo">画像未読み込み</span>
+ </div>
+ <div class="stage" id="sourceStage"><canvas id="sourceCanvas" width="1" height="1"></canvas></div>
+ <p class="hint">画像上をドラッグして範囲を指定。数値入力で位置や寸法を微調整できます。</p>
+ <div class="section">
+  <h3>切り抜き範囲（元画像のピクセル座標）</h3>
+  <div class="grid2">
+   <div class="field"><label for="cropX">X（左端）</label><input id="cropX" type="number" min="0" value="0"></div>
+   <div class="field"><label for="cropY">Y（上端）</label><input id="cropY" type="number" min="0" value="0"></div>
+   <div class="field"><label for="cropW">幅</label><input id="cropW" type="number" min="1" value="1"></div>
+   <div class="field"><label for="cropH">高さ</label><input id="cropH" type="number" min="1" value="1"></div>
+  </div>
+ </div>
+</section>
+<section class="panel">
+ <h2>2. 出力設定</h2>
+ <div class="grid2">
+  <div class="field"><label for="outW">出力幅（px）</label><input id="outW" type="number" min="1" max="12000" value="256"></div>
+  <div class="field"><label for="outH">出力高さ（px）</label><input id="outH" type="number" min="1" max="12000" value="256"></div>
+ </div>
+ <div class="inline"><input id="keepRatio" type="checkbox" checked><label for="keepRatio">出力の縦横比を維持（幅を変えると高さも調整）</label></div>
+ <div class="section">
+  <div class="field"><label for="fitMode">切り抜き範囲の配置</label><select id="fitMode">
+   <option value="stretch">引き伸ばす（縦横比が変わる場合あり）</option>
+   <option value="contain">全体を収める（余白あり）</option>
+   <option value="cover">キャンバスを埋める（端を切り取る）</option>
+  </select></div>
+  <div class="grid2" style="margin-top:10px">
+   <div class="field"><label for="format">出力形式</label><select id="format"><option value="image/png">PNG（透過・可逆）</option><option value="image/webp">WebP</option><option value="image/jpeg">JPEG（透過なし）</option></select></div>
+   <div class="field"><label for="quality">WebP / JPEG 品質：<span id="qualityText">90%</span></label><input id="quality" type="range" min="10" max="100" value="90"></div>
+  </div>
+  <div class="field" style="margin-top:10px"><label for="smoothing">補間方式</label><select id="smoothing"><option value="high">高品質（ブラウザの高品質補間）</option><option value="medium">標準品質</option><option value="low">低品質・高速</option><option value="pixelated">最近傍補間（ドット絵向け）</option></select></div>
+  <div class="grid2" style="margin-top:10px">
+   <div class="field"><label for="background">透明部分の背景色（JPEG用）</label><input id="background" type="color" value="#ffffff"></div>
+   <div class="field"><label for="sharpen">シャープネス</label><select id="sharpen"><option value="0">なし</option><option value="0.2">弱</option><option value="0.4">中</option><option value="0.65">強</option></select></div>
+  </div>
+ </div>
+ <div class="section">
+  <h2>3. 加工後プレビュー</h2>
+  <div class="stage preview"><canvas id="resultCanvas" width="1" height="1"></canvas></div>
+  <p class="status" id="resultInfo">画像を読み込むとプレビューが表示されます。</p>
+  <p class="status" id="status" aria-live="polite"></p>
+  <div class="actions"><button id="refresh" class="primary" disabled>プレビューを更新</button><button id="download" disabled>画像を保存</button></div>
+ </div>
+</section>
+</main>
+<footer>画像は外部サーバーへ送信せず、このブラウザ内で処理します。高解像度画像ではメモリを多く使用する場合があります。</footer>
+<script>
+(() => {
+ 'use strict';
+ const $ = id => document.getElementById(id);
+ const source = $('sourceCanvas'), sctx = source.getContext('2d');
+ const result = $('resultCanvas'), rctx = result.getContext('2d');
+ let image = null, originalName = 'image', crop = {x:0,y:0,w:1,h:1}, viewScaleX=1, viewScaleY=1;
+ let dragging=false, dragStart=null, lastBlob=null;
+ const MAX_SIDE=12000, MAX_PIXELS=40000000;
+ const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
+ const setStatus=(message,isError=false)=>{$('status').textContent=message;$('status').classList.toggle('warn',isError)};
+ function writeCropInputs(){ $('cropX').value=crop.x;$('cropY').value=crop.y;$('cropW').value=crop.w;$('cropH').value=crop.h; }
+ function normalizeCrop(c){
+  const iw=image.naturalWidth,ih=image.naturalHeight;
+  const x=clamp(Math.round(Number(c.x)||0),0,iw-1),y=clamp(Math.round(Number(c.y)||0),0,ih-1);
+  return {x,y,w:clamp(Math.round(Number(c.w)||1),1,iw-x),h:clamp(Math.round(Number(c.h)||1),1,ih-y)};
+ }
+ function setCrop(c,fromInputs=false){
+  if(!image)return;
+  crop=normalizeCrop(c);writeCropInputs();drawSource();render();
+ }
+ function drawSource(){
+  if(!image)return;
+  const availableW=Math.max(200,$('sourceStage').clientWidth-16);
+  const availableH=Math.max(200,Math.min(window.innerHeight*.62,720));
+  const scale=Math.min(availableW/image.naturalWidth,availableH/image.naturalHeight,1);
+  const w=Math.max(1,Math.round(image.naturalWidth*scale)),h=Math.max(1,Math.round(image.naturalHeight*scale));
+  source.width=w;source.height=h;viewScaleX=w/image.naturalWidth;viewScaleY=h/image.naturalHeight;
+  sctx.clearRect(0,0,w,h);sctx.drawImage(image,0,0,w,h);
+  const x=crop.x*viewScaleX,y=crop.y*viewScaleY,cw=crop.w*viewScaleX,ch=crop.h*viewScaleY;
+  sctx.save();sctx.fillStyle='rgba(0,0,0,.55)';sctx.fillRect(0,0,w,h);sctx.clearRect(x,y,cw,ch);
+  sctx.drawImage(image,crop.x,crop.y,crop.w,crop.h,x,y,cw,ch);
+  sctx.strokeStyle='#77c5ff';sctx.lineWidth=2;sctx.setLineDash([6,3]);sctx.strokeRect(x+.5,y+.5,Math.max(0,cw-1),Math.max(0,ch-1));sctx.restore();
+ }
+ function readCropInputs(){
+  if(!image)return;
+  setCrop({x:$('cropX').value,y:$('cropY').value,w:$('cropW').value,h:$('cropH').value},true);
+ }
+ function getOutputSize(){
+  let w=Math.round(Number($('outW').value)),h=Math.round(Number($('outH').value));
+  if(!Number.isFinite(w)||w<1)w=1;if(!Number.isFinite(h)||h<1)h=1;
+  w=clamp(w,1,MAX_SIDE);h=clamp(h,1,MAX_SIDE);
+  if(w*h>MAX_PIXELS){const scale=Math.sqrt(MAX_PIXELS/(w*h));w=Math.max(1,Math.floor(w*scale));h=Math.max(1,Math.floor(h*scale));setStatus('出力の総画素数が大きいため、'+w+' × '+h+' px に制限しました。',true);}
+  $('outW').value=w;$('outH').value=h;return {w,h};
+ }
+ function applySharpen(ctx,w,h,amount){
+  if(!amount||w<3||h<3||w*h>16000000)return;
+  const imageData=ctx.getImageData(0,0,w,h),src=new Uint8ClampedArray(imageData.data),dst=imageData.data;
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
+   const i=(y*w+x)*4;
+   for(let c=0;c<3;c++){
+    const avg=(src[i-4+c]+src[i+4+c]+src[i-w*4+c]+src[i+w*4+c])/4;
+    dst[i+c]=clamp(src[i+c]+(src[i+c]-avg)*amount,0,255);
+   }
+  }
+  ctx.putImageData(imageData,0,0);
+ }
+ function render(){
+  if(!image)return;
+  const {w:ow,h:oh}=getOutputSize();
+  if(ow*oh>MAX_PIXELS){setStatus('出力サイズが大きすぎます。寸法を小さくしてください。',true);return;}
+  result.width=ow;result.height=oh;rctx.clearRect(0,0,ow,oh);
+  const format=$('format').value;
+  if(format==='image/jpeg'){rctx.fillStyle=$('background').value;rctx.fillRect(0,0,ow,oh);}
+  const mode=$('fitMode').value;
+  rctx.imageSmoothingEnabled=$('smoothing').value!=='pixelated';
+  rctx.imageSmoothingQuality=['high','medium','low'].includes($('smoothing').value)?$('smoothing').value:'high';
+  let sx=crop.x,sy=crop.y,sw=crop.w,sh=crop.h,dx=0,dy=0,dw=ow,dh=oh;
+  if(mode==='contain'){
+   const scale=Math.min(ow/sw,oh/sh);dw=sw*scale;dh=sh*scale;dx=(ow-dw)/2;dy=(oh-dh)/2;
+  }else if(mode==='cover'){
+   const target=ow/oh,ratio=sw/sh;
+   if(ratio>target){const newW=sh*target;sx+=(sw-newW)/2;sw=newW;}
+   else{const newH=sw/target;sy+=(sh-newH)/2;sh=newH;}
+  }
+  rctx.drawImage(image,sx,sy,sw,sh,dx,dy,dw,dh);
+  applySharpen(rctx,ow,oh,Number($('sharpen').value));
+  $('resultInfo').textContent=ow+' × '+oh+' px ／ 切り抜き '+crop.w+' × '+crop.h+' px';
+  $('download').disabled=false;lastBlob=null;
+  setStatus('プレビューを更新しました。');
+ }
+ function pointFromEvent(e){
+  const rect=source.getBoundingClientRect();
+  return {x:clamp((e.clientX-rect.left)*source.width/rect.width,0,source.width),y:clamp((e.clientY-rect.top)*source.height/rect.height,0,source.height)};
+ }
+ $('fileInput').addEventListener('change',e=>{
+  const file=e.target.files?.[0];if(!file)return;
+  if(!file.type.startsWith('image/')){setStatus('画像ファイルを選択してください。',true);return;}
+  const url=URL.createObjectURL(file),next=new Image();
+  next.onload=()=>{
+   image=next;originalName=file.name.replace(/\.[^.]+$/,'')||'image';
+   crop={x:0,y:0,w:image.naturalWidth,h:image.naturalHeight};writeCropInputs();
+   $('sourceInfo').textContent=image.naturalWidth+' × '+image.naturalHeight+' px';
+   $('refresh').disabled=false;$('resetCrop').disabled=false;
+   const defaultW=Math.min(256,image.naturalWidth),defaultH=Math.max(1,Math.round(defaultW*image.naturalHeight/image.naturalWidth));
+   $('outW').value=defaultW;$('outH').value=defaultH;
+   drawSource();render();URL.revokeObjectURL(url);
+  };
+  next.onerror=()=>{URL.revokeObjectURL(url);setStatus('画像を読み込めませんでした。別の画像をお試しください。',true);};
+  next.src=url;
+ });
+ source.addEventListener('pointerdown',e=>{
+  if(!image)return;dragging=true;dragStart=pointFromEvent(e);source.setPointerCapture(e.pointerId);
+ });
+ source.addEventListener('pointermove',e=>{
+  if(!dragging||!image)return;
+  const p=pointFromEvent(e),x=Math.min(p.x,dragStart.x)/viewScaleX,y=Math.min(p.y,dragStart.y)/viewScaleY;
+  const w=Math.abs(p.x-dragStart.x)/viewScaleX,h=Math.abs(p.y-dragStart.y)/viewScaleY;
+  if(w>=1&&h>=1){crop=normalizeCrop({x,y,w,h});writeCropInputs();drawSource();render();}
+ });
+ source.addEventListener('pointerup',()=>{dragging=false;});
+ source.addEventListener('pointercancel',()=>{dragging=false;});
+ ['cropX','cropY','cropW','cropH'].forEach(id=>$(id).addEventListener('change',readCropInputs));
+ $('outW').addEventListener('change',()=>{
+  if($('keepRatio').checked&&image){const w=clamp(Math.round(Number($('outW').value)||1),1,MAX_SIDE);$('outH').value=Math.max(1,Math.round(w*crop.h/crop.w));}
+  render();
+ });
+ $('outH').addEventListener('change',()=>{
+  if($('keepRatio').checked&&image){const h=clamp(Math.round(Number($('outH').value)||1),1,MAX_SIDE);$('outW').value=Math.max(1,Math.round(h*crop.w/crop.h));}
+  render();
+ });
+ $('quality').addEventListener('input',()=>{$('qualityText').textContent=$('quality').value+'%';});
+ ['fitMode','format','quality','smoothing','sharpen','background'].forEach(id=>$(id).addEventListener('change',render));
+ $('refresh').addEventListener('click',render);
+ $('resetCrop').addEventListener('click',()=>{if(image)setCrop({x:0,y:0,w:image.naturalWidth,h:image.naturalHeight});});
+ $('download').addEventListener('click',()=>{
+  if(!image)return;
+  const mime=$('format').value,quality=Number($('quality').value)/100;
+  result.toBlob(blob=>{
+   if(!blob){setStatus('画像を書き出せませんでした。別の形式を試してください。',true);return;}
+   const ext=mime==='image/jpeg'?'jpg':mime==='image/webp'?'webp':'png';
+   const a=document.createElement('a'),url=URL.createObjectURL(blob);
+   a.href=url;a.download=originalName+'_processed.'+ext;document.body.appendChild(a);a.click();a.remove();
+   setTimeout(()=>URL.revokeObjectURL(url),1500);
+   setStatus('保存を開始しました（'+Math.round(blob.size/1024)+' KB）。');
+  },mime,quality);
+ });
+ window.addEventListener('resize',()=>{if(image)drawSource();});
+})();
+</script>
+</body>
+</html>
