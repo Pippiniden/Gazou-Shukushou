@@ -24,7 +24,10 @@ label{display:block;color:var(--muted);font-size:.83rem;margin-bottom:4px}.field
 .inline{display:flex;align-items:center;gap:8px;margin-top:9px}.inline label{margin:0}
 .file-input{display:none}.pill{font-size:.78rem;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:3px 8px}
 .stage{min-height:300px;display:flex;align-items:center;justify-content:center;overflow:auto;border-radius:8px;position:relative;background-color:#0b0e13;background-image:linear-gradient(45deg,#171e28 25%,transparent 25%),linear-gradient(-45deg,#171e28 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#171e28 75%),linear-gradient(-45deg,transparent 75%,#171e28 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}
-#sourceCanvas{display:block;max-width:100%;max-height:65vh;touch-action:none;cursor:crosshair}
+#sourceCanvas{display:block;max-width:100%;max-height:65vh;touch-action:none;cursor:crosshair;flex:none}
+#sourceCanvas.zoomed{max-width:none;max-height:none}
+#sourceStage.zoomed{justify-content:flex-start;align-items:flex-start}
+#zoomLabel{min-width:52px;text-align:center}
 #sourceCanvas.move-mode{cursor:grab}#sourceCanvas.move-mode.dragging{cursor:grabbing}
 button[aria-pressed="true"]{background:#185b8e;border-color:#77c5ff}
 .preview{min-height:240px;padding:10px}#resultCanvas{display:block;max-width:100%;max-height:48vh;object-fit:contain;image-rendering:auto}
@@ -47,10 +50,11 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   <label class="file-button" for="fileInput">画像を読み込む</label><input class="file-input" id="fileInput" type="file" accept="image/*">
   <button id="resetCrop" disabled>全体を選択</button>
   <button id="moveMode" disabled aria-pressed="false">範囲を移動：OFF</button>
+  <button id="zoomOut" disabled title="縮小">−</button><span class="pill" id="zoomLabel">100%</span><button id="zoomIn" disabled title="拡大">＋</button><button id="zoomReset" disabled>倍率リセット</button>
   <span class="pill" id="sourceInfo">画像未読み込み</span>
  </div>
  <div class="stage" id="sourceStage"><canvas id="sourceCanvas" width="1" height="1"></canvas></div>
- <p class="hint">通常はドラッグして範囲を選択。［範囲を移動］をONにすると、選択範囲の内側をドラッグして位置だけを移動できます。数値入力で微調整も可能です。</p>
+ <p class="hint">ドラッグで範囲選択。Shift＋ドラッグで正方形、Alt＋ドラッグで現在の選択範囲の縦横比を維持します。ホイールまたはピンチで拡大・縮小できます。［範囲を移動］ONでは選択範囲の位置を移動します。数値入力で微調整も可能です。</p>
  <div class="section">
   <h3>切り抜き範囲（元画像のピクセル座標）</h3>
   <div class="grid2">
@@ -102,8 +106,10 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
  const $ = id => document.getElementById(id);
  const source = $('sourceCanvas'), sctx = source.getContext('2d');
  const result = $('resultCanvas'), rctx = result.getContext('2d');
- let image = null, originalName = 'image', crop = {x:0,y:0,w:1,h:1}, viewScaleX=1, viewScaleY=1;
+ let image = null, originalName = 'image', crop = {x:0,y:0,w:1,h:1}, viewScaleX=1, viewScaleY=1, zoom=1;
  let dragging=false, dragStart=null, lastBlob=null, moveMode=false, dragOrigin=null;
+ const activePointers=new Map();
+ let pinchStart=null;
  const MAX_SIDE=12000, MAX_PIXELS=40000000;
  const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
  const setStatus=(message,isError=false)=>{$('status').textContent=message;$('status').classList.toggle('warn',isError)};
@@ -119,11 +125,16 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
  }
  function drawSource(){
   if(!image)return;
-  const availableW=Math.max(200,$('sourceStage').clientWidth-16);
+  const stage=$('sourceStage');
+  const availableW=Math.max(200,stage.clientWidth-16);
   const availableH=Math.max(200,Math.min(window.innerHeight*.62,720));
-  const scale=Math.min(availableW/image.naturalWidth,availableH/image.naturalHeight,1);
+  const baseScale=Math.min(availableW/image.naturalWidth,availableH/image.naturalHeight,1);
+  const scale=baseScale*zoom;
   const w=Math.max(1,Math.round(image.naturalWidth*scale)),h=Math.max(1,Math.round(image.naturalHeight*scale));
   source.width=w;source.height=h;viewScaleX=w/image.naturalWidth;viewScaleY=h/image.naturalHeight;
+  source.classList.toggle('zoomed',zoom>1);
+  stage.classList.toggle('zoomed',zoom>1);
+  $('zoomLabel').textContent=Math.round(zoom*100)+'%';
   sctx.clearRect(0,0,w,h);sctx.drawImage(image,0,0,w,h);
   const x=crop.x*viewScaleX,y=crop.y*viewScaleY,cw=crop.w*viewScaleX,ch=crop.h*viewScaleY;
   sctx.save();sctx.fillStyle='rgba(0,0,0,.55)';sctx.fillRect(0,0,w,h);sctx.clearRect(x,y,cw,ch);
@@ -301,8 +312,8 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
    crop={x:0,y:0,w:image.naturalWidth,h:image.naturalHeight};writeCropInputs();
    $('sourceInfo').textContent=image.naturalWidth+' × '+image.naturalHeight+' px';
    $('refresh').disabled=false;$('resetCrop').disabled=false;$('moveMode').disabled=false;
-   const defaultW=Math.min(256,image.naturalWidth),defaultH=Math.max(1,Math.round(defaultW*image.naturalHeight/image.naturalWidth));
-   $('outW').value=defaultW;$('outH').value=defaultH;
+   zoom=1;
+   ['zoomIn','zoomOut','zoomReset'].forEach(id=>$(id).disabled=false);
    drawSource();render();URL.revokeObjectURL(url);
   };
   next.onerror=()=>{URL.revokeObjectURL(url);setStatus('画像を読み込めませんでした。別の画像をお試しください。',true);};
@@ -312,16 +323,53 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   const x=p.x/viewScaleX,y=p.y/viewScaleY;
   return x>=crop.x&&x<=crop.x+crop.w&&y>=crop.y&&y<=crop.y+crop.h;
  }
+ function zoomAt(nextZoom,clientX,clientY){
+  if(!image)return;
+  const stage=$('sourceStage'),oldZoom=zoom;
+  nextZoom=clamp(nextZoom,.25,8);
+  if(Math.abs(nextZoom-oldZoom)<.001)return;
+  const rect=stage.getBoundingClientRect();
+  const localX=clientX==null?stage.clientWidth/2:clientX-rect.left;
+  const localY=clientY==null?stage.clientHeight/2:clientY-rect.top;
+  const imageX=(stage.scrollLeft+localX)/oldZoom,imageY=(stage.scrollTop+localY)/oldZoom;
+  zoom=nextZoom;drawSource();
+  stage.scrollLeft=Math.max(0,imageX*zoom-localX);
+  stage.scrollTop=Math.max(0,imageY*zoom-localY);
+ }
+ function pointerDistance(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+ function pointerMidpoint(a,b){return {x:(a.x+b.x)/2,y:(a.y+b.y)/2};}
+ source.addEventListener('wheel',e=>{
+  if(!image)return;
+  e.preventDefault();
+  const factor=e.deltaY<0?1.15:1/1.15;
+  zoomAt(zoom*factor,e.clientX,e.clientY);
+ },{passive:false});
  source.addEventListener('pointerdown',e=>{
   if(!image)return;
+  activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  source.setPointerCapture(e.pointerId);
+  if(activePointers.size===2){
+   const pts=[...activePointers.values()],mid=pointerMidpoint(pts[0],pts[1]);
+   pinchStart={distance:Math.max(1,pointerDistance(pts[0],pts[1])),zoom,mid};
+   dragging=false;source.classList.remove('dragging');return;
+  }
+  if(activePointers.size>2){dragging=false;return;}
   const p=pointFromEvent(e);
-  dragging=true;dragStart=p;source.setPointerCapture(e.pointerId);
+  dragging=true;dragStart=p;
   if(moveMode){
    if(!pointInCrop(p)){dragging=false;return;}
    dragOrigin={x:crop.x,y:crop.y};source.classList.add('dragging');
   }
  });
  source.addEventListener('pointermove',e=>{
+  if(activePointers.has(e.pointerId))activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(activePointers.size>=2){
+   const pts=[...activePointers.values()].slice(0,2),dist=Math.max(1,pointerDistance(pts[0],pts[1]));
+   if(!pinchStart)pinchStart={distance:dist,zoom,mid:pointerMidpoint(pts[0],pts[1])};
+   const mid=pointerMidpoint(pts[0],pts[1]);
+   zoomAt(pinchStart.zoom*dist/pinchStart.distance,mid.x,mid.y);
+   dragging=false;return;
+  }
   if(!dragging||!image)return;
   const p=pointFromEvent(e);
   if(moveMode){
@@ -329,13 +377,33 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
    crop=normalizeCrop({x:dragOrigin.x+dx,y:dragOrigin.y+dy,w:crop.w,h:crop.h});
    writeCropInputs();drawSource();render();return;
   }
-  const x=Math.min(p.x,dragStart.x)/viewScaleX,y=Math.min(p.y,dragStart.y)/viewScaleY;
-  const w=Math.abs(p.x-dragStart.x)/viewScaleX,h=Math.abs(p.y-dragStart.y)/viewScaleY;
+  const sx=dragStart.x/viewScaleX,sy=dragStart.y/viewScaleY;
+  let ex=p.x/viewScaleX,ey=p.y/viewScaleY;
+  let dx=ex-sx,dy=ey-sy;
+  if(e.shiftKey){
+   const side=Math.max(Math.abs(dx),Math.abs(dy));
+   dx=(dx<0?-1:1)*side;dy=(dy<0?-1:1)*side;
+   ex=sx+dx;ey=sy+dy;
+  }else if(e.altKey){
+   const ratio=Math.max(.0001,crop.w/crop.h);
+   if(Math.abs(dx)/Math.max(.0001,Math.abs(dy))>ratio)dy=(dy<0?-1:1)*Math.abs(dx)/ratio;
+   else dx=(dx<0?-1:1)*Math.abs(dy)*ratio;
+   ex=sx+dx;ey=sy+dy;
+  }
+  const x=Math.min(sx,ex),y=Math.min(sy,ey),w=Math.abs(ex-sx),h=Math.abs(ey-sy);
   if(w>=1&&h>=1){crop=normalizeCrop({x,y,w,h});writeCropInputs();drawSource();render();}
  });
- function endPointer(){dragging=false;source.classList.remove('dragging');}
+ function endPointer(e){
+  activePointers.delete(e.pointerId);
+  if(activePointers.size<2)pinchStart=null;
+  if(activePointers.size===0){dragging=false;source.classList.remove('dragging');}
+  else dragging=false;
+ }
  source.addEventListener('pointerup',endPointer);
  source.addEventListener('pointercancel',endPointer);
+ $('zoomIn').addEventListener('click',()=>zoomAt(zoom*1.25));
+ $('zoomOut').addEventListener('click',()=>zoomAt(zoom/1.25));
+ $('zoomReset').addEventListener('click',()=>zoomAt(1));
  $('moveMode').addEventListener('click',()=>{
   moveMode=!moveMode;
   $('moveMode').textContent='範囲を移動：'+(moveMode?'ON':'OFF');
