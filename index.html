@@ -27,14 +27,15 @@ label{display:block;color:var(--muted);font-size:.83rem;margin-bottom:4px}.field
 #sourceStage{display:flex;max-height:min(72vh,760px);overscroll-behavior:contain}
 #sourceCanvas{display:block;margin:auto;touch-action:none;cursor:crosshair;flex:none}
 #zoomLabel{min-width:52px;text-align:center}
+#sourceCanvas.panning,#sourceCanvas.move-mode.panning{cursor:grabbing}
 #sourceCanvas.move-mode{cursor:grab}#sourceCanvas.move-mode.dragging{cursor:grabbing}
 button[aria-pressed="true"]{background:#185b8e;border-color:#77c5ff}
 .preview{min-height:240px;padding:10px}#resultCanvas{display:block;max-width:100%;max-height:40vh;object-fit:contain;image-rendering:auto}
-.preview-block{position:sticky;top:0;z-index:2;background:var(--panel);padding-bottom:10px;margin-bottom:4px}
+.preview-block{padding-bottom:10px;margin-bottom:4px}
 .hint,.status{font-size:.82rem;color:var(--muted);margin:8px 0 0}.status{min-height:1.3em}.warn{color:var(--danger)}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.full{width:100%}
 footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-size:.8rem}
-@media(max-width:900px){.preview-block{position:static}main{grid-template-columns:1fr;padding:10px}.panel{padding:12px}.stage{min-height:230px}#sourceStage{max-height:60vh}header{padding:15px}}
+@media(max-width:900px){main{grid-template-columns:1fr;padding:10px}.panel{padding:12px}.stage{min-height:230px}#sourceStage{max-height:60vh}header{padding:15px}}
 @media(max-width:420px){.grid3{grid-template-columns:1fr 1fr}.grid2{gap:8px}}
 </style>
 </head>
@@ -54,7 +55,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   <span class="pill" id="sourceInfo">画像未読み込み</span>
  </div>
  <div class="stage" id="sourceStage"><canvas id="sourceCanvas" width="1" height="1"></canvas></div>
- <p class="hint">ドラッグで範囲選択。Shift＋ドラッグで正方形、Alt＋ドラッグで現在の選択範囲の縦横比を維持します。ホイールまたはピンチで拡大・縮小できます。［範囲を移動］ONでは選択範囲の位置を移動します。数値入力で微調整も可能です。</p>
+ <p class="hint">ドラッグで範囲選択。Shift＋ドラッグで正方形、Alt＋ドラッグで現在の選択範囲の縦横比を維持します。ホイールまたはピンチで拡大・縮小、ホイールクリック（中ボタン）のドラッグでスクロールできます。［範囲を移動］ONでは選択範囲の位置を移動します。数値入力で微調整も可能です。</p>
  <div class="section">
   <h3>切り抜き範囲（元画像のピクセル座標）</h3>
   <div class="grid2">
@@ -111,7 +112,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
  let image = null, originalName = 'image', crop = {x:0,y:0,w:1,h:1}, viewScaleX=1, viewScaleY=1, zoom=1, baseScale=1, renderTimer=null;
  let dragging=false, dragStart=null, lastBlob=null, moveMode=false, dragOrigin=null, dragAspectRatio=1;
  const activePointers=new Map();
- let pinchStart=null;
+ let pinchStart=null, panning=null;
  const MAX_SIDE=12000, MAX_PIXELS=40000000;
  const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
  const setStatus=(message,isError=false)=>{$('status').textContent=message;$('status').classList.toggle('warn',isError)};
@@ -359,6 +360,11 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
  },{passive:false});
  source.addEventListener('pointerdown',e=>{
   if(!image)return;
+  if(e.button===1){
+   e.preventDefault();const stage=$('sourceStage');
+   panning={id:e.pointerId,x:e.clientX,y:e.clientY,left:stage.scrollLeft,top:stage.scrollTop};
+   source.setPointerCapture(e.pointerId);source.classList.add('panning');return;
+  }
   activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   source.setPointerCapture(e.pointerId);
   if(activePointers.size===2){
@@ -374,7 +380,14 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
    dragOrigin={x:crop.x,y:crop.y};source.classList.add('dragging');
   }
  });
+ source.addEventListener('mousedown',e=>{if(e.button===1)e.preventDefault();});
  source.addEventListener('pointermove',e=>{
+  if(panning&&e.pointerId===panning.id){
+   const stage=$('sourceStage');
+   stage.scrollLeft=panning.left-(e.clientX-panning.x);
+   stage.scrollTop=panning.top-(e.clientY-panning.y);
+   return;
+  }
   if(activePointers.has(e.pointerId))activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(activePointers.size>=2){
    const pts=[...activePointers.values()].slice(0,2),dist=Math.max(1,pointerDistance(pts[0],pts[1]));
@@ -407,6 +420,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   if(w>=1&&h>=1){crop=normalizeCrop({x,y,w,h});writeCropInputs();drawSource();scheduleRender();}
  });
  function endPointer(e){
+  if(panning&&e.pointerId===panning.id){panning=null;source.classList.remove('panning');return;}
   activePointers.delete(e.pointerId);
   if(activePointers.size===0)flushRender();
   if(activePointers.size<2)pinchStart=null;
