@@ -24,9 +24,8 @@ label{display:block;color:var(--muted);font-size:.83rem;margin-bottom:4px}.field
 .inline{display:flex;align-items:center;gap:8px;margin-top:9px}.inline label{margin:0}
 .file-input{display:none}.pill{font-size:.78rem;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:3px 8px}
 .stage{min-height:300px;display:flex;align-items:center;justify-content:center;overflow:auto;border-radius:8px;position:relative;background-color:#0b0e13;background-image:linear-gradient(45deg,#171e28 25%,transparent 25%),linear-gradient(-45deg,#171e28 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#171e28 75%),linear-gradient(-45deg,transparent 75%,#171e28 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}
-#sourceCanvas{display:block;max-width:100%;max-height:65vh;touch-action:none;cursor:crosshair;flex:none}
-#sourceCanvas.zoomed{max-width:none;max-height:none}
-#sourceStage.zoomed{justify-content:flex-start;align-items:flex-start}
+#sourceStage{display:flex;max-height:min(72vh,760px);overscroll-behavior:contain}
+#sourceCanvas{display:block;margin:auto;touch-action:none;cursor:crosshair;flex:none}
 #zoomLabel{min-width:52px;text-align:center}
 #sourceCanvas.move-mode{cursor:grab}#sourceCanvas.move-mode.dragging{cursor:grabbing}
 button[aria-pressed="true"]{background:#185b8e;border-color:#77c5ff}
@@ -34,7 +33,7 @@ button[aria-pressed="true"]{background:#185b8e;border-color:#77c5ff}
 .hint,.status{font-size:.82rem;color:var(--muted);margin:8px 0 0}.status{min-height:1.3em}.warn{color:var(--danger)}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.full{width:100%}
 footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-size:.8rem}
-@media(max-width:900px){main{grid-template-columns:1fr;padding:10px}.panel{padding:12px}.stage{min-height:230px}#sourceCanvas{max-height:52vh}header{padding:15px}}
+@media(max-width:900px){main{grid-template-columns:1fr;padding:10px}.panel{padding:12px}.stage{min-height:230px}#sourceStage{max-height:60vh}header{padding:15px}}
 @media(max-width:420px){.grid3{grid-template-columns:1fr 1fr}.grid2{gap:8px}}
 </style>
 </head>
@@ -106,7 +105,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
  const $ = id => document.getElementById(id);
  const source = $('sourceCanvas'), sctx = source.getContext('2d');
  const result = $('resultCanvas'), rctx = result.getContext('2d');
- let image = null, originalName = 'image', crop = {x:0,y:0,w:1,h:1}, viewScaleX=1, viewScaleY=1, zoom=1;
+ let image = null, originalName = 'image', crop = {x:0,y:0,w:1,h:1}, viewScaleX=1, viewScaleY=1, zoom=1, baseScale=1, renderTimer=null;
  let dragging=false, dragStart=null, lastBlob=null, moveMode=false, dragOrigin=null, dragAspectRatio=1;
  const activePointers=new Map();
  let pinchStart=null;
@@ -123,17 +122,20 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   if(!image)return;
   crop=normalizeCrop(c);writeCropInputs();drawSource();render();
  }
+ // Fit scale is fixed per image/window size so scrollbars appearing while zoomed never rescale the view.
+ function updateBaseScale(){
+  if(!image)return;
+  const availableW=Math.max(200,$('sourceStage').offsetWidth-16);
+  const availableH=Math.max(200,Math.min(window.innerHeight*.62,720));
+  baseScale=Math.min(availableW/image.naturalWidth,availableH/image.naturalHeight,1);
+ }
+ function scheduleRender(){clearTimeout(renderTimer);renderTimer=setTimeout(()=>{renderTimer=null;render();},150);}
+ function flushRender(){if(renderTimer!==null){clearTimeout(renderTimer);renderTimer=null;render();}}
  function drawSource(){
   if(!image)return;
-  const stage=$('sourceStage');
-  const availableW=Math.max(200,stage.clientWidth-16);
-  const availableH=Math.max(200,Math.min(window.innerHeight*.62,720));
-  const baseScale=Math.min(availableW/image.naturalWidth,availableH/image.naturalHeight,1);
   const scale=baseScale*zoom;
   const w=Math.max(1,Math.round(image.naturalWidth*scale)),h=Math.max(1,Math.round(image.naturalHeight*scale));
   source.width=w;source.height=h;viewScaleX=w/image.naturalWidth;viewScaleY=h/image.naturalHeight;
-  source.classList.toggle('zoomed',zoom>1);
-  stage.classList.toggle('zoomed',zoom>1);
   $('zoomLabel').textContent=Math.round(zoom*100)+'%';
   sctx.clearRect(0,0,w,h);sctx.drawImage(image,0,0,w,h);
   const x=crop.x*viewScaleX,y=crop.y*viewScaleY,cw=crop.w*viewScaleX,ch=crop.h*viewScaleY;
@@ -316,7 +318,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
    crop={x:0,y:0,w:image.naturalWidth,h:image.naturalHeight};writeCropInputs();
    $('sourceInfo').textContent=image.naturalWidth+' × '+image.naturalHeight+' px';
    $('refresh').disabled=false;$('resetCrop').disabled=false;$('moveMode').disabled=false;
-   zoom=1;
+   zoom=1;updateBaseScale();
    ['zoomIn','zoomOut','zoomReset'].forEach(id=>$(id).disabled=false);
    drawSource();render();URL.revokeObjectURL(url);
   };
@@ -327,19 +329,23 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   const x=p.x/viewScaleX,y=p.y/viewScaleY;
   return x>=crop.x&&x<=crop.x+crop.w&&y>=crop.y&&y<=crop.y+crop.h;
  }
- function zoomAt(nextZoom,clientX,clientY){
+ // Keeps the image point under (clientX, clientY) fixed. `anchor` ({fx,fy} as fractions of the canvas)
+ // lets a pinch gesture keep its original point under the moving fingers.
+ function zoomAt(nextZoom,clientX,clientY,anchor){
   if(!image)return;
-  const stage=$('sourceStage'),oldZoom=zoom;
+  const stage=$('sourceStage');
   nextZoom=clamp(nextZoom,.25,8);
-  if(Math.abs(nextZoom-oldZoom)<.001)return;
-  const rect=stage.getBoundingClientRect();
-  const localX=clientX==null?stage.clientWidth/2:clientX-rect.left;
-  const localY=clientY==null?stage.clientHeight/2:clientY-rect.top;
-  const imageX=(stage.scrollLeft+localX)/oldZoom,imageY=(stage.scrollTop+localY)/oldZoom;
+  if(!anchor&&Math.abs(nextZoom-zoom)<.001)return;
+  const sr=stage.getBoundingClientRect(),cr=source.getBoundingClientRect();
+  if(clientX==null){clientX=sr.left+stage.clientWidth/2;clientY=sr.top+stage.clientHeight/2;}
+  const fx=anchor?anchor.fx:clamp((clientX-cr.left)/cr.width,0,1);
+  const fy=anchor?anchor.fy:clamp((clientY-cr.top)/cr.height,0,1);
   zoom=nextZoom;drawSource();
-  stage.scrollLeft=Math.max(0,imageX*zoom-localX);
-  stage.scrollTop=Math.max(0,imageY*zoom-localY);
+  const nr=source.getBoundingClientRect();
+  stage.scrollLeft+=nr.left+fx*nr.width-clientX;
+  stage.scrollTop+=nr.top+fy*nr.height-clientY;
  }
+ function anchorAt(cx,cy){const r=source.getBoundingClientRect();return {fx:clamp((cx-r.left)/r.width,0,1),fy:clamp((cy-r.top)/r.height,0,1)};}
  function pointerDistance(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
  function pointerMidpoint(a,b){return {x:(a.x+b.x)/2,y:(a.y+b.y)/2};}
  source.addEventListener('wheel',e=>{
@@ -354,7 +360,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   source.setPointerCapture(e.pointerId);
   if(activePointers.size===2){
    const pts=[...activePointers.values()],mid=pointerMidpoint(pts[0],pts[1]);
-   pinchStart={distance:Math.max(1,pointerDistance(pts[0],pts[1])),zoom,mid};
+   pinchStart={distance:Math.max(1,pointerDistance(pts[0],pts[1])),zoom,anchor:anchorAt(mid.x,mid.y)};
    dragging=false;source.classList.remove('dragging');return;
   }
   if(activePointers.size>2){dragging=false;return;}
@@ -369,9 +375,9 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   if(activePointers.has(e.pointerId))activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(activePointers.size>=2){
    const pts=[...activePointers.values()].slice(0,2),dist=Math.max(1,pointerDistance(pts[0],pts[1]));
-   if(!pinchStart)pinchStart={distance:dist,zoom,mid:pointerMidpoint(pts[0],pts[1])};
    const mid=pointerMidpoint(pts[0],pts[1]);
-   zoomAt(pinchStart.zoom*dist/pinchStart.distance,mid.x,mid.y);
+   if(!pinchStart)pinchStart={distance:dist,zoom,anchor:anchorAt(mid.x,mid.y)};
+   zoomAt(pinchStart.zoom*dist/pinchStart.distance,mid.x,mid.y,pinchStart.anchor);
    dragging=false;return;
   }
   if(!dragging||!image)return;
@@ -379,7 +385,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   if(moveMode){
    const dx=(p.x-dragStart.x)/viewScaleX,dy=(p.y-dragStart.y)/viewScaleY;
    crop=normalizeCrop({x:dragOrigin.x+dx,y:dragOrigin.y+dy,w:crop.w,h:crop.h});
-   writeCropInputs();drawSource();render();return;
+   writeCropInputs();drawSource();scheduleRender();return;
   }
   const sx=dragStart.x/viewScaleX,sy=dragStart.y/viewScaleY;
   let ex=p.x/viewScaleX,ey=p.y/viewScaleY;
@@ -395,10 +401,11 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
    ex=sx+dx;ey=sy+dy;
   }
   const x=Math.min(sx,ex),y=Math.min(sy,ey),w=Math.abs(ex-sx),h=Math.abs(ey-sy);
-  if(w>=1&&h>=1){crop=normalizeCrop({x,y,w,h});writeCropInputs();drawSource();render();}
+  if(w>=1&&h>=1){crop=normalizeCrop({x,y,w,h});writeCropInputs();drawSource();scheduleRender();}
  });
  function endPointer(e){
   activePointers.delete(e.pointerId);
+  if(activePointers.size===0)flushRender();
   if(activePointers.size<2)pinchStart=null;
   if(activePointers.size===0){dragging=false;source.classList.remove('dragging');}
   else dragging=false;
@@ -440,7 +447,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
    setStatus('保存を開始しました（'+Math.round(blob.size/1024)+' KB）。');
   },mime,quality);
  });
- window.addEventListener('resize',()=>{if(image)drawSource();});
+ window.addEventListener('resize',()=>{if(image){updateBaseScale();drawSource();}});
 })();
 </script>
 </body>
