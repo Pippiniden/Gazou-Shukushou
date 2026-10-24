@@ -29,11 +29,12 @@ label{display:block;color:var(--muted);font-size:.83rem;margin-bottom:4px}.field
 #zoomLabel{min-width:52px;text-align:center}
 #sourceCanvas.move-mode{cursor:grab}#sourceCanvas.move-mode.dragging{cursor:grabbing}
 button[aria-pressed="true"]{background:#185b8e;border-color:#77c5ff}
-.preview{min-height:240px;padding:10px}#resultCanvas{display:block;max-width:100%;max-height:48vh;object-fit:contain;image-rendering:auto}
+.preview{min-height:240px;padding:10px}#resultCanvas{display:block;max-width:100%;max-height:40vh;object-fit:contain;image-rendering:auto}
+.preview-block{position:sticky;top:0;z-index:2;background:var(--panel);padding-bottom:10px;margin-bottom:4px}
 .hint,.status{font-size:.82rem;color:var(--muted);margin:8px 0 0}.status{min-height:1.3em}.warn{color:var(--danger)}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.full{width:100%}
 footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-size:.8rem}
-@media(max-width:900px){main{grid-template-columns:1fr;padding:10px}.panel{padding:12px}.stage{min-height:230px}#sourceStage{max-height:60vh}header{padding:15px}}
+@media(max-width:900px){.preview-block{position:static}main{grid-template-columns:1fr;padding:10px}.panel{padding:12px}.stage{min-height:230px}#sourceStage{max-height:60vh}header{padding:15px}}
 @media(max-width:420px){.grid3{grid-template-columns:1fr 1fr}.grid2{gap:8px}}
 </style>
 </head>
@@ -65,7 +66,15 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
  </div>
 </section>
 <section class="panel">
- <h2>2. 出力設定</h2>
+ <div class="preview-block">
+  <h2>2. 加工後プレビュー</h2>
+  <div class="stage preview"><canvas id="resultCanvas" width="1" height="1"></canvas></div>
+  <p class="status" id="resultInfo">画像を読み込むとプレビューが表示されます。</p>
+  <p class="status" id="status" aria-live="polite"></p>
+  <div class="actions"><button id="refresh" class="primary" disabled>プレビューを更新</button><button id="download" disabled>画像を保存</button></div>
+ </div>
+ <div class="section">
+  <h2>3. 出力設定</h2>
  <div class="grid2">
   <div class="field"><label for="outW">出力幅（px）</label><input id="outW" type="number" min="1" max="12000" value="256"></div>
   <div class="field"><label for="outH">出力高さ（px）</label><input id="outH" type="number" min="1" max="12000" value="256"></div>
@@ -89,12 +98,6 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   <div class="field" style="margin-top:10px"><label for="denoise">ノイズ除去（リサイズ後）</label><select id="denoise"><option value="0">なし</option><option value="1">弱 — ザラつきを軽減</option><option value="2">中 — ザラつきを強めに軽減</option><option value="3">強 — 細部が変化する場合あり</option></select></div>
   <p class="hint">輪郭をなるべく保つエッジ保持型フィルターです。イラストの細線や模様も変化することがあるため、強さを変えて比較してください。</p>
  </div>
- <div class="section">
-  <h2>3. 加工後プレビュー</h2>
-  <div class="stage preview"><canvas id="resultCanvas" width="1" height="1"></canvas></div>
-  <p class="status" id="resultInfo">画像を読み込むとプレビューが表示されます。</p>
-  <p class="status" id="status" aria-live="polite"></p>
-  <div class="actions"><button id="refresh" class="primary" disabled>プレビューを更新</button><button id="download" disabled>画像を保存</button></div>
  </div>
 </section>
 </main>
@@ -447,6 +450,15 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
    setStatus('保存を開始しました（'+Math.round(blob.size/1024)+' KB）。');
   },mime,quality);
  });
+ const PERSIST=['format','quality','fitMode','smoothing','sharpen','denoise','background'];
+ try{
+  const saved=JSON.parse(localStorage.getItem('outputSettings')||'{}');
+  PERSIST.forEach(id=>{const el=$(id);if(saved[id]!=null&&[...(el.options||[{value:saved[id]}])].some(o=>o.value===saved[id]))el.value=saved[id];});
+  $('qualityText').textContent=$('quality').value+'%';
+ }catch(e){}
+ PERSIST.forEach(id=>$(id).addEventListener('change',()=>{
+  try{localStorage.setItem('outputSettings',JSON.stringify(Object.fromEntries(PERSIST.map(k=>[k,$(k).value]))));}catch(e){}
+ }));
  window.addEventListener('resize',()=>{if(image){updateBaseScale();drawSource();}});
 })();
 </script>
