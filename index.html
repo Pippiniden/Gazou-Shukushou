@@ -50,7 +50,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
  <div class="toolbar">
   <label class="file-button" for="fileInput">画像を読み込む</label><input class="file-input" id="fileInput" type="file" accept="image/*">
   <button id="resetCrop" disabled>全体を選択</button>
-  <button id="moveMode" disabled aria-pressed="false">範囲を移動：OFF</button>
+  <button id="moveMode" disabled aria-pressed="false" title="ショートカット: M" aria-keyshortcuts="M">範囲を移動：OFF</button>
   <button id="zoomOut" disabled title="縮小">−</button><span class="pill" id="zoomLabel">100%</span><button id="zoomIn" disabled title="拡大">＋</button><button id="zoomReset" disabled>倍率リセット</button>
   <span class="pill" id="sourceInfo">画像未読み込み</span>
  </div>
@@ -432,6 +432,14 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
  $('zoomIn').addEventListener('click',()=>zoomAt(zoom*1.25));
  $('zoomOut').addEventListener('click',()=>zoomAt(zoom/1.25));
  $('zoomReset').addEventListener('click',()=>zoomAt(1));
+ document.addEventListener('keydown',e=>{
+  if(e.key.toLowerCase()!=='m'||e.ctrlKey||e.metaKey||e.altKey||e.repeat)return;
+  const t=e.target;
+  if(t&&(t.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(t.tagName)))return;
+  if($('moveMode').disabled)return;
+  e.preventDefault();
+  $('moveMode').click();
+ });
  $('moveMode').addEventListener('click',()=>{
   moveMode=!moveMode;
   $('moveMode').textContent='範囲を移動：'+(moveMode?'ON':'OFF');
