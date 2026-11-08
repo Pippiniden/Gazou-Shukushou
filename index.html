@@ -55,7 +55,7 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   <span class="pill" id="sourceInfo">画像未読み込み</span>
  </div>
  <div class="stage" id="sourceStage"><canvas id="sourceCanvas" width="1" height="1"></canvas></div>
- <p class="hint">ドラッグで範囲選択。Shift＋ドラッグで正方形、Alt＋ドラッグで現在の選択範囲の縦横比を維持します。ホイールまたはピンチで拡大・縮小、ホイールクリック（中ボタン）のドラッグでスクロールできます。［範囲を移動］ONでは選択範囲の位置を移動します。数値入力で微調整も可能です。</p>
+ <p class="hint">ドラッグで範囲選択。Shift＋ドラッグで正方形、Alt＋ドラッグで現在の選択範囲の縦横比を維持します。ホイールまたはピンチで拡大・縮小、ホイールクリック（中ボタン）のドラッグでスクロールできます。［範囲を移動］ONでは選択範囲の位置を移動します。縦横比を固定すると、ドラッグでも数値入力でも比率を保ったまま範囲を作成でき、四隅の■をドラッグするとサイズだけを変更できます。数値入力で微調整も可能です。</p>
  <div class="section">
   <h3>切り抜き範囲（元画像のピクセル座標）</h3>
   <div class="grid2">
@@ -63,6 +63,18 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
    <div class="field"><label for="cropY">Y（上端）</label><input id="cropY" type="number" min="0" value="0"></div>
    <div class="field"><label for="cropW">幅</label><input id="cropW" type="number" min="1" value="1"></div>
    <div class="field"><label for="cropH">高さ</label><input id="cropH" type="number" min="1" value="1"></div>
+  </div>
+  <div class="grid3" style="margin-top:10px;align-items:end">
+   <div class="field"><label for="ratioPreset">縦横比の固定</label><select id="ratioPreset">
+    <option value="free">固定しない</option>
+    <option value="current">現在の範囲の比率</option>
+    <option value="output">出力サイズの比率</option>
+    <option value="1:1">1 : 1</option><option value="4:3">4 : 3</option><option value="3:4">3 : 4</option>
+    <option value="16:9">16 : 9</option><option value="9:16">9 : 16</option><option value="3:2">3 : 2</option><option value="2:3">2 : 3</option>
+    <option value="custom">カスタム</option>
+   </select></div>
+   <div class="field"><label for="ratioW">比率 横</label><input id="ratioW" type="number" min="0.01" step="any" value="1" disabled></div>
+   <div class="field"><label for="ratioH">比率 縦</label><input id="ratioH" type="number" min="0.01" step="any" value="1" disabled></div>
   </div>
  </div>
 </section>
@@ -145,11 +157,52 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   const x=crop.x*viewScaleX,y=crop.y*viewScaleY,cw=crop.w*viewScaleX,ch=crop.h*viewScaleY;
   sctx.save();sctx.fillStyle='rgba(0,0,0,.55)';sctx.fillRect(0,0,w,h);sctx.clearRect(x,y,cw,ch);
   sctx.drawImage(image,crop.x,crop.y,crop.w,crop.h,x,y,cw,ch);
-  sctx.strokeStyle='#77c5ff';sctx.lineWidth=2;sctx.setLineDash([6,3]);sctx.strokeRect(x+.5,y+.5,Math.max(0,cw-1),Math.max(0,ch-1));sctx.restore();
+  sctx.strokeStyle='#77c5ff';sctx.lineWidth=2;sctx.setLineDash([6,3]);sctx.strokeRect(x+.5,y+.5,Math.max(0,cw-1),Math.max(0,ch-1));
+  if(lockedRatio()&&!moveMode){sctx.setLineDash([]);sctx.fillStyle='#77c5ff';sctx.strokeStyle='#10141b';sctx.lineWidth=1;
+   for(const [hx,hy] of [[x,y],[x+cw,y],[x,y+ch],[x+cw,y+ch]]){sctx.fillRect(hx-5,hy-5,10,10);sctx.strokeRect(hx-5.5,hy-5.5,11,11);}}
+  sctx.restore();
  }
- function readCropInputs(){
+ // Aspect ratio lock: returns width/height, or 0 when not locked.
+ function lockedRatio(){
+  if($('ratioPreset').value==='free')return 0;
+  const w=Number($('ratioW').value),h=Number($('ratioH').value);
+  return w>0&&h>0?w/h:0;
+ }
+ // Largest crop of ratio R that fits inside the image from (x,y), limited to w (and h if given).
+ function fitToRatio(c,R,basis){
+  const iw=image.naturalWidth,ih=image.naturalHeight;
+  const x=clamp(Math.round(Number(c.x)||0),0,iw-1),y=clamp(Math.round(Number(c.y)||0),0,ih-1);
+  let w=basis==='h'?(Number(c.h)||1)*R:(Number(c.w)||1);
+  w=Math.max(1,Math.min(w,iw-x,(ih-y)*R));
+  let h=Math.max(1,Math.round(w/R));
+  w=Math.max(1,Math.min(Math.round(w),iw-x));
+  return {x,y,w,h:Math.min(h,ih-y)};
+ }
+ function readCropInputs(e){
   if(!image)return;
-  setCrop({x:$('cropX').value,y:$('cropY').value,w:$('cropW').value,h:$('cropH').value},true);
+  const c={x:$('cropX').value,y:$('cropY').value,w:$('cropW').value,h:$('cropH').value},R=lockedRatio();
+  setCrop(R?fitToRatio(c,R,e&&e.target.id==='cropH'?'h':'w'):c,true);
+ }
+ function applyRatioPreset(){
+  const sel=$('ratioPreset'),v=sel.value,rw=$('ratioW'),rh=$('ratioH');
+  rw.disabled=rh.disabled=(v==='free');
+  if(v==='current'&&image){rw.value=crop.w;rh.value=crop.h;}
+  else if(v==='output'){rw.value=Number($('outW').value)||1;rh.value=Number($('outH').value)||1;}
+  else if(/^\d+:\d+$/.test(v)){[rw.value,rh.value]=v.split(':');}
+  const R=lockedRatio();
+  if(!image||!R)return;
+  // Shrink the current selection (about its centre) to the chosen ratio.
+  let nw=crop.w,nh=crop.h;
+  if(nw/nh>R)nw=nh*R;else nh=nw/R;
+  setCrop({x:crop.x+(crop.w-nw)/2,y:crop.y+(crop.h-nh)/2,w:nw,h:nh});
+  setStatus('縦横比を '+rw.value+' : '+rh.value+' に固定しました。四隅の■をドラッグするとサイズを変更できます。');
+ }
+ const HANDLE=14;
+ function cornerAt(p){
+  const x0=crop.x*viewScaleX,y0=crop.y*viewScaleY,x1=(crop.x+crop.w)*viewScaleX,y1=(crop.y+crop.h)*viewScaleY;
+  for(const [cx,cy,ax,ay] of [[x0,y0,x1,y1],[x1,y0,x0,y1],[x0,y1,x1,y0],[x1,y1,x0,y0]])
+   if(Math.abs(p.x-cx)<=HANDLE&&Math.abs(p.y-cy)<=HANDLE)return {x:ax,y:ay};
+  return null;
  }
  function getOutputSize(){
   let w=Math.round(Number($('outW').value)),h=Math.round(Number($('outH').value));
@@ -378,6 +431,8 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   if(moveMode){
    if(!pointInCrop(p)){dragging=false;return;}
    dragOrigin={x:crop.x,y:crop.y};source.classList.add('dragging');
+  }else if(lockedRatio()){
+   const corner=cornerAt(p);if(corner)dragStart=corner; // resize: opposite corner stays fixed
   }
  });
  source.addEventListener('mousedown',e=>{if(e.button===1)e.preventDefault();});
@@ -406,7 +461,15 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   const sx=dragStart.x/viewScaleX,sy=dragStart.y/viewScaleY;
   let ex=p.x/viewScaleX,ey=p.y/viewScaleY;
   let dx=ex-sx,dy=ey-sy;
-  if(e.shiftKey){
+  const R=lockedRatio();
+  if(R){
+   const sgnX=dx<0?-1:1,sgnY=dy<0?-1:1;
+   const availW=sgnX>0?image.naturalWidth-sx:sx,availH=sgnY>0?image.naturalHeight-sy:sy;
+   let w=Math.abs(dx),h=Math.abs(dy);
+   if(w/Math.max(.0001,h)>R)h=w/R;else w=h*R;
+   w=Math.min(w,availW,availH*R);h=w/R;
+   dx=sgnX*w;dy=sgnY*h;ex=sx+dx;ey=sy+dy;
+  }else if(e.shiftKey){
    const side=Math.max(Math.abs(dx),Math.abs(dy));
    dx=(dx<0?-1:1)*side;dy=(dy<0?-1:1)*side;
    ex=sx+dx;ey=sy+dy;
@@ -444,10 +507,15 @@ footer{max-width:1500px;margin:auto;padding:0 16px 20px;color:var(--muted);font-
   moveMode=!moveMode;
   $('moveMode').textContent='範囲を移動：'+(moveMode?'ON':'OFF');
   $('moveMode').setAttribute('aria-pressed',String(moveMode));
-  source.classList.toggle('move-mode',moveMode);
+  source.classList.toggle('move-mode',moveMode);drawSource();
   setStatus(moveMode?'移動モード：選択範囲の内側をドラッグして移動できます。':'範囲選択モード：ドラッグして新しい範囲を指定できます。');
  });
  ['cropX','cropY','cropW','cropH'].forEach(id=>$(id).addEventListener('change',readCropInputs));
+ $('ratioPreset').addEventListener('change',applyRatioPreset);
+ ['ratioW','ratioH'].forEach(id=>$(id).addEventListener('change',()=>{
+  if($('ratioPreset').value!=='free')$('ratioPreset').value='custom';
+  applyRatioPreset();
+ }));
  $('outW').addEventListener('change',()=>{
   if($('keepRatio').checked&&image){const w=clamp(Math.round(Number($('outW').value)||1),1,MAX_SIDE);$('outH').value=Math.max(1,Math.round(w*crop.h/crop.w));}
   render();
